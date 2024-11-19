@@ -1,0 +1,121 @@
+# Python
+__pycache__
+.py[cod]
+$py.class
+.so
+.Python
+build
+develop-eggs
+dist
+downloads
+eggs
+.eggs
+lib
+lib64
+parts
+sdist
+var
+wheels
+.egg-info
+.installed.cfg
+.egg
+MANIFEST
+
+# Django
+.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media
+staticfiles
+
+# Virtual Environment
+venv
+env
+ENV
+.env
+.venv
+env.bak
+venv.bak
+
+# IDE - VSCode
+.vscode
+.code-workspace
+
+# IDE - PyCharm
+.idea
+.iml
+.iws
+.ipr
+
+# IDE - Sublime Text
+.sublime-workspace
+.sublime-project
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# Coverage reports
+htmlcov
+.tox
+.nox
+.coverage
+.coverage.
+.cache
+nosetests.xml
+coverage.xml
+.cover
+.py,cover
+.hypothesis
+.pytest_cache
+cover
+
+# Logs
+logs
+.log
+
+# Local development settings
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Database
+.sqlite3
+.db
+
+# System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+.swp
+.swo
+~
+
+# Dependencies
+node_modules
+package-lock.json
+yarn.lock
+
+# Distribution
+dist
+build
+
+# Environment variables
+.env
+!.env.example
+
+# Docker
+docker-compose.override.yml
+
+# Secrets
+.pem
+.key
+.cert
+.crt
+
+# Migration files (optional, uncomment if you want to ignore migrations)
+# migrations.py
+# !migrations__init__.py
