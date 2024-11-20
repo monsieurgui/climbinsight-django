@@ -23,9 +23,9 @@ from users.api import router as users_router
 
 api = NinjaAPI()
 
-api.add_router("/leagues/", leagues_router)
-api.add_router("/competitions/", competitions_router)
-api.add_router("/users/", users_router)
+api.add_router("leagues", leagues_router)
+api.add_router("competitions", competitions_router)
+api.add_router("users", users_router)
 
 urlpatterns = [
     path("admin/", admin.site.urls),

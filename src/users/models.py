@@ -1,6 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils.translation import gettext_lazy as _
+import datetime
 
 # Create your models here.
 class Role(models.Model):
@@ -119,3 +120,131 @@ class User(AbstractUser):
     def has_role(self, role_name):
         """Check if user has specific role"""
         return self.role and self.role.name == role_name
+
+class Profile(models.Model):
+    # ... existing profile fields ...
+
+    # League-related fields
+    OFFICIAL_ROLES = [
+        ('judge', _('Judge')),
+        ('technical', _('Technical Delegate')),
+        ('chief', _('Chief Judge')),
+        ('route_setter', _('Route Setter')),
+    ]
+    
+    official_roles = models.JSONField(
+        _('Official Roles'),
+        default=list,
+        help_text=_('List of official roles this user can perform')
+    )
+    
+    official_certifications = models.JSONField(
+        _('Official Certifications'),
+        default=list,
+        help_text=_('List of certifications held by the official')
+    )
+    
+    athlete_categories = models.JSONField(
+        _('Athlete Categories'),
+        default=list,
+        help_text=_('Categories in which this athlete competes')
+    )
+    
+    # Optional: Competition history
+    competition_history = models.JSONField(
+        _('Competition History'),
+        default=dict,
+        blank=True,
+        help_text=_('Historical record of competition participation and results')
+    )
+
+    # ... rest of the model ...
+
+    def add_official_role(self, role):
+        """Add an official role if it's valid and not already present"""
+        if role in dict(self.OFFICIAL_ROLES) and role not in self.official_roles:
+            self.official_roles.append(role)
+            self.save()
+            return True
+        return False
+
+    def remove_official_role(self, role):
+        """Remove an official role if present"""
+        if role in self.official_roles:
+            self.official_roles.remove(role)
+            self.save()
+            return True
+        return False
+
+    def add_certification(self, certification_data):
+        """
+        Add a certification with validation date and expiry
+        certification_data should be a dict with:
+        {
+            'name': str,
+            'issuer': str,
+            'date_issued': str (YYYY-MM-DD),
+            'expiry_date': str (YYYY-MM-DD),
+            'certification_number': str
+        }
+        """
+        if certification_data not in self.official_certifications:
+            self.official_certifications.append(certification_data)
+            self.save()
+            return True
+        return False
+
+    def add_athlete_category(self, category):
+        """Add an athlete category if not already present"""
+        if category not in self.athlete_categories:
+            self.athlete_categories.append(category)
+            self.save()
+            return True
+        return False
+
+    def record_competition_result(self, competition_data):
+        """
+        Record a competition result
+        competition_data should be a dict with:
+        {
+            'competition_id': int,
+            'date': str (YYYY-MM-DD),
+            'category': str,
+            'placement': int,
+            'points': int,
+            'notes': str
+        }
+        """
+        competition_id = str(competition_data['competition_id'])
+        if competition_id not in self.competition_history:
+            self.competition_history[competition_id] = competition_data
+            self.save()
+            return True
+        return False
+
+    def get_active_certifications(self):
+        """Return list of non-expired certifications"""
+        today = datetime.date.today()
+        return [
+            cert for cert in self.official_certifications
+            if datetime.datetime.strptime(cert['expiry_date'], '%Y-%m-%d').date() > today
+        ]
+
+    def can_officiate_role(self, role):
+        """Check if user can perform a specific official role"""
+        return role in self.official_roles
+
+    def get_competition_history_by_year(self, year):
+        """Get competition history filtered by year"""
+        return {
+            comp_id: data
+            for comp_id, data in self.competition_history.items()
+            if data['date'].startswith(str(year))
+        }
+
+    class Meta:
+        verbose_name = _('Profile')
+        verbose_name_plural = _('Profiles')
+
+    def __str__(self):
+        return f"Profile for {self.user.email}"

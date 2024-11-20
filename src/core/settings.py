@@ -43,7 +43,6 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # Our apps
     'leagues.apps.LeaguesConfig',
     'competitions.apps.CompetitionsConfig',
     'events.apps.EventsConfig',
@@ -146,6 +145,7 @@ AUTH_USER_MODEL = 'users.User'  # We'll create this custom user model
 NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'AUTH_HEADER_TYPES': ('Bearer',),
 }
 
 # Social Auth settings
@@ -199,3 +199,5 @@ CORS_ALLOWED_ORIGINS = [
 
 # Add this with your other settings
 ALLOW_REGISTRATION = False
+
+APPEND_SLASH = True

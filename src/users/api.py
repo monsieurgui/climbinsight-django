@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, List
 from ninja import Router, Schema
 from ninja_jwt.controller import NinjaJWTDefaultController
 from django.contrib.auth import get_user_model, authenticate
@@ -10,8 +10,13 @@ from django.core.mail import send_mail
 from django.conf import settings
 from django.core.signing import TimestampSigner
 from django.core import exceptions
+from django.shortcuts import get_object_or_404
+from django.db import models
 
+from competitions.api import CompetitionOut
+from leagues.schemas import LeagueOut
 from users.models import Role
+from competitions.models import Competition
 
 User = get_user_model()
 router = Router()
@@ -68,6 +73,17 @@ class RoleAssignmentSchema(Schema):
 class RegistrationStatusSchema(Schema):
     enabled: bool
     message: Optional[str] = None
+
+class UserLeagueSchema(Schema):
+    league_id: int
+    role: str  # 'athlete' or 'official'
+    categories: List[str]
+
+class UserLeagueResponseSchema(Schema):
+    leagues_as_athlete: List[LeagueOut]
+    leagues_as_official: List[LeagueOut]
+    total_competitions: int
+    current_rankings: dict
 
 @router.get("/registration-status", response=RegistrationStatusSchema)
 def get_registration_status(request):
@@ -173,5 +189,43 @@ def list_active_sessions(request):
 def revoke_session(request, session_id: str):
     # Revoke specific session
     pass
+
+@router.get("/me/leagues", response=UserLeagueResponseSchema, auth=JWTAuth())
+def get_user_leagues(request):
+    """Get all leagues associated with the current user"""
+    user = request.auth
+    return {
+        "leagues_as_athlete": user.participating_leagues.all(),
+        "leagues_as_official": user.officiating_leagues.all(),
+        "total_competitions": user.competition_history.count() if hasattr(user, 'competition_history') else 0,
+        "current_rankings": {}  # Implement ranking aggregation logic
+    }
+
+@router.post("/me/leagues/{league_id}/join", auth=JWTAuth())
+def join_league(request, league_id: int, data: UserLeagueSchema):
+    """Join a league as either athlete or official"""
+    user = request.auth
+    league = get_object_or_404(League, id=league_id)
+    
+    if data.role == 'athlete':
+        league.athletes.add(user)
+        if hasattr(user, 'profile'):
+            user.profile.athlete_categories.extend(data.categories)
+            user.profile.save()
+    elif data.role == 'official' and user.has_role('official'):
+        league.officials.add(user)
+    else:
+        return {"error": "Invalid role or insufficient permissions"}, 400
+    
+    return {"success": True}
+
+@router.get("/me/competitions", response=List[CompetitionOut], auth=JWTAuth())
+def get_user_competitions(request):
+    """Get all competitions associated with the current user"""
+    user = request.auth
+    return Competition.objects.filter(
+        models.Q(league__athletes=user) | 
+        models.Q(league__officials=user)
+    ).distinct()
 
 # JWT endpoints are automatically added by ninja_jwt 
