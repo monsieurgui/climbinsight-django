@@ -1,0 +1,16 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Verify Your Email</title>
+</head>
+<body>
+    <h2>Welcome to ClimbInsight!</h2>
+    <p>Hello {{ user.first_name }},</p>
+    <p>Thank you for registering with ClimbInsight. To complete your registration, please verify your email address by clicking the link below (valid for {{ valid_hours }} hours):</p>
+    <p><a href="{{ verify_url }}">Verify Email Address</a></p>
+    <p>If the button above doesn't work, copy and paste this URL into your browser:</p>
+    <p>{{ verify_url }}</p>
+    <p>Best regards,<br>ClimbInsight Team</p>
+</body>
+</html> 

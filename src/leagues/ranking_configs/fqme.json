@@ -1,0 +1,113 @@
+{
+    "name": "FQME",
+    "description": "Fédération Québécoise de la Montagne et de l'Escalade rules",
+    "features": [
+        "Best 3 results count",
+        "Provincial, Regional, and Local competitions",
+        "Points scaled by competition level",
+        "Minimum 2 competitions required"
+    ],
+    "scoring": {
+        "lead": {
+            "base_points": {
+                "hold": 1,
+                "plus_modifier_enhanced": 0.75
+            },
+            "ranking_points": {
+                "provincial": {
+                    "1": 100, "2": 80, "3": 65, "4": 55, "5": 51,
+                    "6": 47, "7": 43, "8": 40, "9": 37, "10": 34,
+                    "11": 31, "12": 28, "13": 26, "14": 24, "15": 22,
+                    "16": 20, "17": 18, "18": 16, "19": 14, "20": 12
+                },
+                "regional": {
+                    "multiplier": 0.7
+                },
+                "local": {
+                    "multiplier": 0.5
+                }
+            }
+        },
+        "boulder": {
+            "points": {
+                "top": 800,
+                "zone": 200
+            },
+            "penalties": {
+                "top_attempt": {
+                    "value": 20,
+                    "max_deduction_10_attempts": 200
+                },
+                "zone_attempt": {
+                    "value": 5,
+                    "max_deduction_10_attempts": 50
+                }
+            },
+            "ranking_points": {
+                "provincial": {
+                    "same_as_lead": true
+                },
+                "regional": {
+                    "multiplier": 0.7
+                },
+                "local": {
+                    "multiplier": 0.5
+                }
+            }
+        },
+        "speed": {
+            "follows_ifsc_rules": true,
+            "ranking_points": {
+                "provincial": {
+                    "same_as_lead": true
+                },
+                "regional": {
+                    "multiplier": 0.7
+                },
+                "local": {
+                    "multiplier": 0.5
+                }
+            }
+        }
+    },
+    "qualification_criteria": {
+        "min_competitions": 2,
+        "min_provincial": 1,
+        "min_points": 30,
+        "category_requirements": {
+            "open": {
+                "min_competitions": 3,
+                "min_provincial": 2,
+                "min_points": 50
+            },
+            "youth": {
+                "min_competitions": 2,
+                "min_provincial": 1,
+                "min_points": 30
+            }
+        }
+    },
+    "ranking": {
+        "best_n_results": 3,
+        "tiebreak": {
+            "methods": [
+                "head_to_head",
+                "most_recent",
+                "most_provincial"
+            ]
+        }
+    },
+    "derogation": {
+        "enabled": true,
+        "rules": {
+            "allow_participation": true,
+            "points_handling": "redistribute",
+            "ranking_display": "with_original_rank",
+            "display_note": "Participation sous dérogation"
+        },
+        "point_redistribution": {
+            "method": "next_athlete",
+            "description": "Les points sont attribués à l'athlète suivant dans le classement"
+        }
+    }
+} 

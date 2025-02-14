@@ -15,19 +15,11 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path
-from ninja import NinjaAPI
-from leagues.api import router as leagues_router
-from competitions.api import router as competitions_router
-from users.api import router as users_router
-
-api = NinjaAPI()
-
-api.add_router("leagues", leagues_router)
-api.add_router("competitions", competitions_router)
-api.add_router("users", users_router)
+from django.urls import path, include
+from .api import api
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("api/", api.urls),
+    path('admin/', admin.site.urls),
+    path('api/', api.urls),  # This will serve the API at /api/ and Swagger docs at /api/docs/
+    path('auth/', include('social_django.urls', namespace='social')),
 ]

@@ -8,19 +8,23 @@ from ninja_jwt.tokens import RefreshToken
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.conf import settings
-from django.core.signing import TimestampSigner
+from django.core.signing import TimestampSigner, SignatureExpired, BadSignature
 from django.core import exceptions
 from django.shortcuts import get_object_or_404
 from django.db import models
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
+from django.core.exceptions import ValidationError
+from django.contrib.auth.password_validation import validate_password
 
 from competitions.api import CompetitionOut
 from leagues.schemas import LeagueOut
 from users.models import Role
 from competitions.models import Competition
+from users.models import UserAuditLog
 
 User = get_user_model()
-router = Router()
-jwt_controller = NinjaJWTDefaultController()
+router = Router(auth=JWTAuth())
 
 class TokenSchema(Schema):
     access: str
@@ -52,9 +56,17 @@ class PasswordResetRequestSchema(Schema):
     email: str
 
 class PasswordResetConfirmSchema(Schema):
-    token: str
     email: str
+    token: str
     new_password: str
+
+    def validate_new_password(self, value):
+        try:
+            # Use Django's password validation
+            validate_password(value)
+            return value
+        except ValidationError as e:
+            raise ValueError(str(e.messages[0]))
 
 class EmailVerificationSchema(Schema):
     token: str
@@ -84,6 +96,21 @@ class UserLeagueResponseSchema(Schema):
     leagues_as_official: List[LeagueOut]
     total_competitions: int
     current_rankings: dict
+
+class AuditLogSchema(Schema):
+    id: int
+    user_id: Optional[int]
+    action: str
+    details: dict
+    ip_address: str
+    timestamp: str
+
+class AuditLogFilterSchema(Schema):
+    user_id: Optional[int] = None
+    action: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    ip_address: Optional[str] = None
 
 @router.get("/registration-status", response=RegistrationStatusSchema)
 def get_registration_status(request):
@@ -133,22 +160,191 @@ def refresh_token(request, refresh_token: str):
 def get_current_user(request):
     return request.auth
 
-@router.post("/password/reset")
+@router.post("/password/reset", response=dict)
 def request_password_reset(request, data: PasswordResetRequestSchema):
     """Send password reset email"""
-    # Add password reset logic
-    pass
+    try:
+        user = User.objects.get(email=data.email)
+        # Generate password reset token
+        token = default_token_generator.make_token(user)
+        
+        # Create reset URL
+        reset_url = f"{settings.FRONTEND_URL}/reset-password?token={token}&email={user.email}"
+        
+        # Prepare email content
+        context = {
+            'user': user,
+            'reset_url': reset_url,
+            'valid_hours': 48
+        }
+        html_message = render_to_string('password_reset_email.html', context)
+        plain_message = strip_tags(html_message)
+        
+        # Send email
+        send_mail(
+            subject='Password Reset Request',
+            message=plain_message,
+            html_message=html_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        
+        return {"message": "Password reset instructions sent to your email"}
+    except User.DoesNotExist:
+        # Return success even if user doesn't exist for security
+        return {"message": "If an account exists with this email, reset instructions have been sent"}
 
-@router.post("/password/reset/confirm")
-def confirm_password_reset(request, token: str, new_password: str):
-    # Reset password logic
-    pass
+@router.post("/password/reset/confirm", response=dict)
+def confirm_password_reset(request, data: PasswordResetConfirmSchema):
+    """Confirm password reset with token"""
+    try:
+        user = User.objects.get(email=data.email)
+        
+        # Verify the token
+        if not default_token_generator.check_token(user, data.token):
+            # Log failed attempt
+            UserAuditLog.objects.create(
+                user=user,
+                action='password_reset_failed',
+                details={
+                    'reason': 'invalid_token',
+                    'ip_address': request.META.get('REMOTE_ADDR'),
+                    'user_agent': request.META.get('HTTP_USER_AGENT')
+                },
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+            return {"error": "Invalid or expired token"}, 400
+        
+        try:
+            # Validate password strength
+            validate_password(data.new_password, user=user)
+        except ValidationError as e:
+            # Log failed attempt due to password validation
+            UserAuditLog.objects.create(
+                user=user,
+                action='password_reset_failed',
+                details={
+                    'reason': 'password_validation',
+                    'validation_error': str(e.messages[0]),
+                    'ip_address': request.META.get('REMOTE_ADDR'),
+                    'user_agent': request.META.get('HTTP_USER_AGENT')
+                },
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+            return {"error": str(e.messages[0])}, 400
+            
+        # Set new password
+        user.set_password(data.new_password)
+        user.save()
+        
+        # Invalidate all existing sessions
+        user.session_set.all().delete()
+        
+        # Log the successful password reset
+        UserAuditLog.objects.create(
+            user=user,
+            action='password_reset_success',
+            details={
+                'method': 'email_token',
+                'ip_address': request.META.get('REMOTE_ADDR'),
+                'user_agent': request.META.get('HTTP_USER_AGENT')
+            },
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        
+        return {"message": "Password successfully reset"}
+    except User.DoesNotExist:
+        # Log attempt with non-existent email
+        UserAuditLog.objects.create(
+            user=None,
+            action='password_reset_failed',
+            details={
+                'reason': 'invalid_email',
+                'attempted_email': data.email,
+                'ip_address': request.META.get('REMOTE_ADDR'),
+                'user_agent': request.META.get('HTTP_USER_AGENT')
+            },
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        return {"error": "Invalid email"}, 400
 
-@router.post("/verify-email")
+@router.post("/verify-email", response=dict)
 def verify_email(request, data: EmailVerificationSchema):
     """Verify user's email address"""
-    # Add email verification logic
-    pass
+    signer = TimestampSigner()
+    try:
+        email = signer.unsign(data.token, max_age=86400)  # 24 hour expiry
+        user = User.objects.get(email=email)
+        
+        if not user.is_active:
+            user.is_active = True
+            user.save()
+            
+            # Log the email verification
+            UserAuditLog.objects.create(
+                user=user,
+                action='email_verified',
+                details={
+                    'method': 'email_token',
+                    'ip_address': request.META.get('REMOTE_ADDR'),
+                    'user_agent': request.META.get('HTTP_USER_AGENT')
+                },
+                ip_address=request.META.get('REMOTE_ADDR')
+            )
+            
+        return {"message": "Email successfully verified"}
+    except (SignatureExpired, BadSignature, User.DoesNotExist):
+        return {"error": "Invalid or expired verification token"}, 400
+
+@router.post("/resend-verification", response=dict)
+def resend_verification_email(request, email: str):
+    """Resend verification email"""
+    try:
+        user = User.objects.get(email=email)
+        if user.is_active:
+            return {"message": "Email is already verified"}
+            
+        # Generate verification token
+        signer = TimestampSigner()
+        token = signer.sign(user.email)
+        
+        # Create verification URL
+        verify_url = f"{settings.FRONTEND_URL}/verify-email?token={token}"
+        
+        # Prepare email content
+        context = {
+            'user': user,
+            'verify_url': verify_url,
+            'valid_hours': 24
+        }
+        html_message = render_to_string('email_verification.html', context)
+        plain_message = strip_tags(html_message)
+        
+        # Send verification email
+        send_mail(
+            subject='Verify Your Email',
+            message=plain_message,
+            html_message=html_message,
+            from_email=settings.DEFAULT_FROM_EMAIL,
+            recipient_list=[user.email],
+            fail_silently=False,
+        )
+        
+        # Log the verification email resend
+        UserAuditLog.objects.create(
+            user=user,
+            action='verification_email_resent',
+            details={
+                'ip_address': request.META.get('REMOTE_ADDR'),
+                'user_agent': request.META.get('HTTP_USER_AGENT')
+            },
+            ip_address=request.META.get('REMOTE_ADDR')
+        )
+        
+        return {"message": "Verification email sent"}
+    except User.DoesNotExist:
+        return {"error": "User not found"}, 404
 
 @router.put("/profile", response=UserResponseSchema, auth=JWTAuth())
 def update_profile(request, data: ProfileUpdateSchema):
@@ -227,5 +423,76 @@ def get_user_competitions(request):
         models.Q(league__athletes=user) | 
         models.Q(league__officials=user)
     ).distinct()
+
+@router.get("/audit-logs", response=List[AuditLogSchema], auth=JWTAuth())
+def get_audit_logs(request, filters: AuditLogFilterSchema = None):
+    """
+    Get audit logs with optional filtering.
+    Only accessible by superusers and users viewing their own logs.
+    """
+    if not request.auth.is_superuser:
+        # Regular users can only view their own logs
+        if filters and filters.user_id and filters.user_id != request.auth.id:
+            return {"error": "Unauthorized to view other users' logs"}, 403
+        filters.user_id = request.auth.id
+
+    # Start with all logs
+    logs = UserAuditLog.objects.all()
+
+    # Apply filters
+    if filters:
+        if filters.user_id:
+            logs = logs.filter(user_id=filters.user_id)
+        if filters.action:
+            logs = logs.filter(action=filters.action)
+        if filters.start_date:
+            logs = logs.filter(timestamp__gte=filters.start_date)
+        if filters.end_date:
+            logs = logs.filter(timestamp__lte=filters.end_date)
+        if filters.ip_address:
+            logs = logs.filter(ip_address=filters.ip_address)
+
+    # Order by most recent first
+    logs = logs.order_by('-timestamp')
+
+    return logs
+
+@router.get("/audit-logs/actions", response=List[str], auth=JWTAuth())
+def get_audit_log_actions(request):
+    """Get list of all possible audit log actions"""
+    return UserAuditLog.objects.values_list('action', flat=True).distinct()
+
+@router.get("/audit-logs/summary", response=dict, auth=JWTAuth())
+def get_audit_logs_summary(request):
+    """Get summary statistics of audit logs"""
+    if not request.auth.is_superuser:
+        return {"error": "Unauthorized"}, 403
+
+    # Get total counts for different actions
+    action_counts = (
+        UserAuditLog.objects
+        .values('action')
+        .annotate(count=models.Count('id'))
+    )
+
+    # Get counts by day for the last 30 days
+    from django.utils import timezone
+    thirty_days_ago = timezone.now() - timezone.timedelta(days=30)
+    daily_counts = (
+        UserAuditLog.objects
+        .filter(timestamp__gte=thirty_days_ago)
+        .extra({'date': "date(timestamp)"})
+        .values('date')
+        .annotate(count=models.Count('id'))
+        .order_by('date')
+    )
+
+    return {
+        "total_logs": UserAuditLog.objects.count(),
+        "action_counts": {item['action']: item['count'] for item in action_counts},
+        "daily_counts": {str(item['date']): item['count'] for item in daily_counts},
+        "unique_users": UserAuditLog.objects.values('user').distinct().count(),
+        "unique_ips": UserAuditLog.objects.values('ip_address').distinct().count()
+    }
 
 # JWT endpoints are automatically added by ninja_jwt 

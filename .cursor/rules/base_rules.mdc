@@ -1,0 +1,10 @@
+---
+description: Basic rules of how to work
+globs: 
+---
+This is a Django Project about a championship management app. 
+The Django app is a PURE API, there will be no frontend served here. It will be connected to a React SPA. 
+There is a spec, called spec.md at the root of the folder which contains essentials, important, optionnal features. 
+The is a file called steps.md, ALWAYS refer to this file before any actions to make sure you are still following the plan.
+There is a file called memory.md. You will compile the changes you made and write it there. This file will serve you as your step tracker, where we are and what we have to do next. You will update this file at every single step of what you are doing. 
+If you are near the context limit and know you will lose these rules, please ask to start a new chat.

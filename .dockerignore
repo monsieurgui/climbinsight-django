@@ -1,0 +1,33 @@
+# Git
+.git
+.gitignore
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+__pycache__
+.Python
+*.py[cod]
+*$py.class
+*.so
+.env
+.env.*
+venv/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Project specific
+src/logs/*
+*.sqlite3
+*.log
+media/
+static/
+docker-compose.yml
+Dockerfile
+README.md 

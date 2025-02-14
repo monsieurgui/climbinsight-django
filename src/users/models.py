@@ -22,12 +22,36 @@ class Role(models.Model):
         verbose_name_plural = _('Roles')
 
 class User(AbstractUser):
-    """Custom user model for the application."""
+    """Custom user model with additional fields for the application."""
+    
+    class Roles(models.TextChoices):
+        ADMIN = 'ADMIN', _('Administrator')
+        ATHLETE = 'ATHLETE', _('Athlete')
+        OFFICIAL = 'OFFICIAL', _('Official')
+        GYM_OWNER = 'GYM_OWNER', _('Gym Owner')
+        ROUTE_SETTER = 'ROUTE_SETTER', _('Route Setter')
+        TECHNICAL_DELEGATE = 'TECH_DELEGATE', _('Technical Delegate')
+        MEDICAL_STAFF = 'MEDICAL_STAFF', _('Medical Staff')
+    
+    email = models.EmailField(_('email address'), unique=True)
+    phone = models.CharField(_('phone number'), max_length=20, blank=True)
+    roles = models.JSONField(_('user roles'), default=list)  # List of roles
+    date_of_birth = models.DateField(_('date of birth'), null=True, blank=True)
+    emergency_contact = models.JSONField(_('emergency contact'), null=True, blank=True)
+    medical_info = models.JSONField(_('medical information'), null=True, blank=True)
+    certifications = models.JSONField(_('certifications'), default=list)
+    
+    # Profile fields
+    bio = models.TextField(_('biography'), blank=True)
+    profile_picture = models.URLField(_('profile picture URL'), blank=True)
+    
+    # Preferences
+    preferences = models.JSONField(_('user preferences'), default=dict)
+    notification_settings = models.JSONField(_('notification settings'), default=dict)
     
     # Auth fields are inherited from AbstractUser:
     # - username
     # - password
-    # - email
     # - first_name
     # - last_name
     # - is_active
@@ -36,8 +60,6 @@ class User(AbstractUser):
     # - date_joined
     
     # Additional fields
-    date_of_birth = models.DateField(null=True, blank=True)
-    phone_number = models.CharField(max_length=15, blank=True)
     avatar = models.URLField(blank=True)
     
     # Social auth fields
@@ -80,6 +102,8 @@ class User(AbstractUser):
     
     class Meta:
         db_table = 'users'
+        verbose_name = _('user')
+        verbose_name_plural = _('users')
         
     def __str__(self):
         return self.email
@@ -97,8 +121,8 @@ class User(AbstractUser):
         # Update any important user data if missing
         if not self.date_of_birth and other_user.date_of_birth:
             self.date_of_birth = other_user.date_of_birth
-        if not self.phone_number and other_user.phone_number:
-            self.phone_number = other_user.phone_number
+        if not self.phone and other_user.phone:
+            self.phone = other_user.phone
         if not self.avatar and other_user.avatar:
             self.avatar = other_user.avatar
         if not self.climbing_level and other_user.climbing_level:
@@ -111,14 +135,30 @@ class User(AbstractUser):
         self.save()
         return True
 
+    def has_role(self, role):
+        """Check if user has a specific role."""
+        return role in self.roles
+    
+    def add_role(self, role):
+        """Add a role to the user."""
+        if role not in self.roles:
+            self.roles.append(role)
+            self.save()
+    
+    def remove_role(self, role):
+        """Remove a role from the user."""
+        if role in self.roles:
+            self.roles.remove(role)
+            self.save()
+
     def has_role_permission(self, permission):
         """Check if user has permission through their role"""
         if not self.role:
             return False
         return permission in self.role.all_permissions
 
-    def has_role(self, role_name):
-        """Check if user has specific role"""
+    def has_role_name(self, role_name):
+        """Check if user has a specific role by name"""
         return self.role and self.role.name == role_name
 
 class Profile(models.Model):
@@ -248,3 +288,17 @@ class Profile(models.Model):
 
     def __str__(self):
         return f"Profile for {self.user.email}"
+
+class UserAuditLog(models.Model):
+    """Audit log for user actions."""
+    
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='audit_logs')
+    action = models.CharField(_('action'), max_length=255)
+    details = models.JSONField(_('action details'))
+    ip_address = models.GenericIPAddressField(_('IP address'))
+    timestamp = models.DateTimeField(_('timestamp'), auto_now_add=True)
+    
+    class Meta:
+        ordering = ['-timestamp']
+        verbose_name = _('user audit log')
+        verbose_name_plural = _('user audit logs')

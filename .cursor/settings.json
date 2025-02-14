@@ -1,9 +1,0 @@
-{
-    "projectInstructions": [
-        "This is a Django Ninja API backend for an Angular frontend.",
-        "It's a pure API project, no templates are needed.",
-        "We will use ninja_jwt for authentication.",
-        "The users app handles user management, authentication, and authorization.",
-        "The core app handles the API routes and the authentication endpoints."
-    ]
-}

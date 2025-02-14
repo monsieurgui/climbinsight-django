@@ -1,0 +1,95 @@
+{
+    "name": "IFSC",
+    "description": "International Federation of Sport Climbing rules",
+    "features": [
+        "Best 5 World Cup results count",
+        "World Championships count separately",
+        "Sophisticated countback system for ties",
+        "Different points for World Cups and Championships"
+    ],
+    "scoring": {
+        "lead": {
+            "base_points": {
+                "hold": 1,
+                "plus_modifier": 0.5
+            },
+            "ranking_points": {
+                "world_cup": {
+                    "1": 100, "2": 80, "3": 65, "4": 55, "5": 51,
+                    "6": 47, "7": 43, "8": 40, "9": 37, "10": 34,
+                    "11": 31, "12": 28, "13": 26, "14": 24, "15": 22,
+                    "16": 20, "17": 18, "18": 16, "19": 14, "20": 12,
+                    "21": 10, "22": 9, "23": 8, "24": 7, "25": 6,
+                    "26": 5, "27": 4, "28": 3, "29": 2, "30": 1
+                },
+                "world_championship": {
+                    "multiplier": 1.5
+                },
+                "continental": {
+                    "multiplier": 0.8
+                }
+            }
+        },
+        "boulder": {
+            "points": {
+                "top": 1000,
+                "zone": 10
+            },
+            "penalties": {
+                "top_attempt": {
+                    "value": 1,
+                    "max_deduction": 99
+                },
+                "zone_attempt": {
+                    "value": 0.1,
+                    "max_deduction": 0.9
+                }
+            },
+            "ranking_points": {
+                "same_as_lead": true
+            }
+        },
+        "speed": {
+            "false_start": {
+                "penalty": "disqualification",
+                "score": "infinity"
+            },
+            "ranking": "time_based",
+            "ranking_points": {
+                "same_as_lead": true
+            }
+        }
+    },
+    "qualification_criteria": {
+        "min_competitions": 3,
+        "min_world_cup": 2,
+        "min_points": 50,
+        "olympic_quota": {
+            "max_per_country": 2,
+            "qualification_spots": 20
+        }
+    },
+    "ranking": {
+        "best_n_results": 5,
+        "tiebreak": {
+            "methods": [
+                "countback",
+                "head_to_head",
+                "most_recent"
+            ]
+        }
+    },
+    "derogation": {
+        "enabled": true,
+        "rules": {
+            "allow_participation": true,
+            "points_handling": "redistribute",
+            "ranking_display": "with_original_rank",
+            "display_note": "Participating under derogation"
+        },
+        "point_redistribution": {
+            "method": "next_athlete",
+            "description": "Points are given to the next athlete in ranking"
+        }
+    }
+} 

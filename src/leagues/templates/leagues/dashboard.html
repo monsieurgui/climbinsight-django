@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block content %}
+<div class="dashboard-container">
+    <div class="dashboard-header">
+        <h1>{{ league.name }} Rankings Dashboard</h1>
+        <div class="dashboard-filters">
+            <form method="GET" class="filter-form">
+                <select name="category" class="form-select">
+                    <option value="">All Categories</option>
+                    {% for category in categories %}
+                    <option value="{{ category.id }}" {% if selected_category.id == category.id %}selected{% endif %}>
+                        {{ category.name }}
+                    </option>
+                    {% endfor %}
+                </select>
+                <input type="date" name="start_date" value="{{ start_date|date:'Y-m-d' }}" class="form-control">
+                <input type="date" name="end_date" value="{{ end_date|date:'Y-m-d' }}" class="form-control">
+                <button type="submit" class="btn btn-primary">Apply Filters</button>
+            </form>
+        </div>
+    </div>
+
+    <div class="dashboard-metrics">
+        <div class="metric-card">
+            <h3>Performance Summary</h3>
+            <div class="metric-content">
+                <p><strong>Total Athletes:</strong> {{ summary.total_athletes }}</p>
+                <p><strong>Average Points:</strong> {{ summary.average_points|floatformat:1 }}</p>
+                <p><strong>Median Points:</strong> {{ summary.median_points|floatformat:1 }}</p>
+                <p><strong>Average Competitions:</strong> {{ summary.average_competitions|floatformat:1 }}</p>
+            </div>
+        </div>
+        
+        <div class="metric-card">
+            <h3>Points Distribution</h3>
+            <div class="metric-content">
+                <p><strong>Top 10%:</strong> {{ summary.points_distribution.top_10|floatformat:1 }}</p>
+                <p><strong>Top 25%:</strong> {{ summary.points_distribution.top_25|floatformat:1 }}</p>
+                <p><strong>Median:</strong> {{ summary.points_distribution.median|floatformat:1 }}</p>
+                <p><strong>Bottom 25%:</strong> {{ summary.points_distribution.bottom_25|floatformat:1 }}</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-charts">
+        <div class="chart-container">
+            <h3>Rankings Over Time</h3>
+            <div id="rankings-chart">
+                <img src="data:image/png;base64,{{ rankings_chart }}" alt="Rankings Over Time">
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h3>Points Distribution</h3>
+            <div id="points-chart">
+                <img src="data:image/png;base64,{{ points_chart }}" alt="Points Distribution">
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <h3>Competition Level Comparison</h3>
+            <div id="level-chart">
+                <img src="data:image/png;base64,{{ level_chart }}" alt="Competition Level Comparison">
+            </div>
+        </div>
+    </div>
+
+    <div class="dashboard-table">
+        <h3>Current Rankings</h3>
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Rank</th>
+                    <th>Athlete</th>
+                    <th>Category</th>
+                    <th>Points</th>
+                    <th>Competitions</th>
+                    <th>Best Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for ranking in rankings %}
+                <tr>
+                    <td>{{ ranking.rank }}</td>
+                    <td>{{ ranking.athlete_name }}</td>
+                    <td>{{ ranking.category }}</td>
+                    <td>{{ ranking.points }}</td>
+                    <td>{{ ranking.competitions }}</td>
+                    <td>{{ ranking.best_result }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.dashboard-container {
+    padding: 20px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.dashboard-header {
+    margin-bottom: 30px;
+}
+
+.dashboard-filters {
+    margin-top: 20px;
+}
+
+.filter-form {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+}
+
+.dashboard-metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.metric-card {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.dashboard-charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 20px;
+    margin-bottom: 30px;
+}
+
+.chart-container {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.chart-container img {
+    width: 100%;
+    height: auto;
+}
+
+.dashboard-table {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+</style>
+{% endblock %} 

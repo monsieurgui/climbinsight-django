@@ -12,6 +12,11 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,17 +26,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-jbzwti)^bo2r3s%051%$82wzyb8z7!+nwz^05)ar)0svnaufg_'
+SECRET_KEY = os.getenv('SECRET_KEY', 'django-insecure-default-dev-key')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '0.0.0.0',
-    'your.local.ip.address'  # e.g., '192.168.1.100'
-]
+ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 
 # Application definition
@@ -51,18 +51,24 @@ INSTALLED_APPS = [
     'ninja',
     'social_django',
     'corsheaders',
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'core.middleware.RequestLoggingMiddleware',
+    'core.middleware.APIVersionMiddleware',
+    'core.middleware.RateLimitingMiddleware',
+    'core.middleware.PerformanceMonitoringMiddleware',
     'users.middleware.RoleMiddleware',
+    'core.middleware.ErrorHandlingMiddleware',  # Keep this last to catch all exceptions
 ]
 
 ROOT_URLCONF = 'core.urls'
@@ -70,7 +76,7 @@ ROOT_URLCONF = 'core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [],
+        'DIRS': [os.path.join(BASE_DIR, 'templates')],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -106,12 +112,18 @@ AUTH_PASSWORD_VALIDATORS = [
     },
     {
         'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8,
+        }
     },
     {
         'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
     },
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+    },
+    {
+        'NAME': 'users.validators.ComplexPasswordValidator',
     },
 ]
 
@@ -143,9 +155,10 @@ AUTH_USER_MODEL = 'users.User'  # We'll create this custom user model
 
 # JWT Settings
 NINJA_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_ACCESS_TOKEN_LIFETIME', 60))),
+    'REFRESH_TOKEN_LIFETIME': timedelta(minutes=int(os.getenv('JWT_REFRESH_TOKEN_LIFETIME', 1440))),
     'AUTH_HEADER_TYPES': ('Bearer',),
+    'ALGORITHM': os.getenv('JWT_ALGORITHM', 'HS256'),
 }
 
 # Social Auth settings
@@ -181,23 +194,76 @@ SOCIAL_AUTH_PIPELINE = (
 )
 
 # Email settings
-EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
-EMAIL_HOST = 'smtp.gmail.com'  # Update based on your email provider
-EMAIL_PORT = 587
-EMAIL_USE_TLS = True
-EMAIL_HOST_USER = 'your-email@gmail.com'  # Update this
-EMAIL_HOST_PASSWORD = 'your-app-specific-password'  # Update this
-DEFAULT_FROM_EMAIL = EMAIL_HOST_USER
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
+EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@climbinsight.com')
 
 # Frontend URL for email links
-FRONTEND_URL = 'http://localhost:4200'  # Update with your Angular app URL
+FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:4200",  # Angular dev server
-]
+CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
 
 # Add this with your other settings
-ALLOW_REGISTRATION = False
+ALLOW_REGISTRATION = os.getenv('ALLOW_REGISTRATION', 'False').lower() == 'true'
 
 APPEND_SLASH = True
+
+# Redis Configuration - Disabled for development
+USE_REDIS = False
+
+# Cache settings - Use local memory cache
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'unique-snowflake',
+    }
+}
+
+# Session settings - Use database sessions
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'
+
+# Logging Configuration
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'file': {
+            'level': os.getenv('LOG_LEVEL', 'INFO'),
+            'class': 'logging.FileHandler',
+            'filename': os.getenv('LOG_FILE', 'logs/climbinsight.log'),
+            'formatter': 'verbose',
+        },
+        'console': {
+            'level': os.getenv('LOG_LEVEL', 'INFO'),
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console', 'file'],
+        'level': os.getenv('LOG_LEVEL', 'INFO'),
+    },
+}
+
+# API Configuration
+API_VERSION = os.getenv('API_VERSION', 'v1')
+API_TITLE = os.getenv('API_TITLE', 'ClimbInsight API')
+API_DESCRIPTION = os.getenv('API_DESCRIPTION', 'API for climbing competition management')
+API_TERMS_OF_SERVICE = os.getenv('API_TERMS_OF_SERVICE', 'https://www.climbinsight.com/terms/')
+API_CONTACT_EMAIL = os.getenv('API_CONTACT_EMAIL', 'contact@climbinsight.com')
+
+# API Rate Limiting Settings
+API_RATE_LIMIT = int(os.getenv('API_RATE_LIMIT', 100))  # requests per minute
+API_RATE_LIMIT_PERIOD = 60  # seconds

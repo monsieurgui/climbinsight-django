@@ -1,0 +1,5 @@
+---
+description: DB and models
+globs: 
+---
+There will be no SQL files given, we will use Django tools to create the models, the relations, etc.
