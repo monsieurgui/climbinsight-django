@@ -101,12 +101,35 @@ class CompetitionRegistration(models.Model):
         unique_together = ['competition', 'athlete', 'category']
 
 
+class Round(models.Model):
+    """Competition rounds (qualifiers, semifinals, finals)."""
+    
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='rounds')
+    name = models.CharField(_('name'), max_length=50)  # e.g., "Finals", "Qualifiers"
+    order = models.IntegerField(_('order'))  # For sorting rounds
+    
+    # Round configuration
+    number_of_problems = models.IntegerField(_('number of problems'))
+    time_limit = models.IntegerField(_('time limit in minutes'))
+    format = models.CharField(_('format'), max_length=50)  # e.g., "IFSC Bouldering"
+    
+    # Round specific rules
+    rules = models.JSONField(_('round specific rules'), default=dict)
+    
+    class Meta:
+        verbose_name = _('round')
+        verbose_name_plural = _('rounds')
+        ordering = ['competition', 'order']
+        unique_together = ['competition', 'name']
+
+
 class CompetitionResult(models.Model):
     """Results for athletes in competitions."""
     
     competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='results')
     athlete = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name='results')
     
     # Results
     ranking = models.IntegerField(_('ranking'))
@@ -118,8 +141,31 @@ class CompetitionResult(models.Model):
     class Meta:
         verbose_name = _('competition result')
         verbose_name_plural = _('competition results')
-        unique_together = ['competition', 'athlete', 'category']
-        ordering = ['category', 'ranking']
+        unique_together = ['competition', 'athlete', 'category', 'round']
+        ordering = ['category', 'round', 'ranking']
+    
+    def get_formatted_score(self):
+        """Returns a formatted score based on the competition type."""
+        if self.round.format == 'IFSC Bouldering':
+            return {
+                'tops': len([a for a in self.attempts if a.get('achieved_top')]),
+                'top_attempts': sum(a.get('top_attempts', 0) for a in self.attempts),
+                'zones': len([a for a in self.attempts if a.get('achieved_zone')]),
+                'zone_attempts': sum(a.get('zone_attempts', 0) for a in self.attempts),
+                'problems_count': self.round.number_of_problems,
+                'detailed_attempts': [
+                    {
+                        'problem_number': i + 1,
+                        'achieved_top': attempt.get('achieved_top', False),
+                        'top_attempts': attempt.get('top_attempts', 0),
+                        'achieved_zone': attempt.get('achieved_zone', False),
+                        'zone_attempts': attempt.get('zone_attempts', 0),
+                        'time_spent': attempt.get('time_spent', '0:00')
+                    }
+                    for i, attempt in enumerate(self.attempts)
+                ]
+            }
+        return self.score  # Return raw score for other formats
 
 
 class Appeal(models.Model):
@@ -149,3 +195,39 @@ class Appeal(models.Model):
         verbose_name = _('appeal')
         verbose_name_plural = _('appeals')
         ordering = ['-submitted_at']
+
+
+class CompetitionStaff(models.Model):
+    """Staff members assigned to competitions with specific roles."""
+    
+    ROLE_CHOICES = [
+        ('Admin', 'Administrator'),
+        ('Technical Delegate', 'Technical Delegate'),
+        ('Route Setter', 'Route Setter'),
+        ('Judge', 'Judge'),
+        ('Safety Officer', 'Safety Officer'),
+        ('Medical Staff', 'Medical Staff'),
+    ]
+    
+    competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='staff')
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='competition_roles')
+    role = models.CharField(_('role'), max_length=50, choices=ROLE_CHOICES)
+    
+    # Additional details
+    assigned_at = models.DateTimeField(_('assigned at'), auto_now_add=True)
+    assigned_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='staff_assignments'
+    )
+    is_active = models.BooleanField(_('active'), default=True)
+    
+    class Meta:
+        verbose_name = _('competition staff')
+        verbose_name_plural = _('competition staff')
+        unique_together = ['competition', 'user', 'role']
+        ordering = ['competition', 'role']
+        
+    def __str__(self):
+        return f"{self.user} - {self.role} at {self.competition}"

@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
@@ -6,6 +6,8 @@ import json
 import os
 
 from leagues.ranking import RankingRule, FQMERules, IFSCRules
+from leagues.rulesets import CustomRuleSet, DynamicPointSystem
+from leagues.validators import RulesetValidator
 
 def load_ruleset_config(ruleset_type: str) -> Dict:
     """Load ruleset configuration from JSON file."""
@@ -35,15 +37,14 @@ class ScoringMethod(Enum):
 
 @dataclass
 class Attempt:
-    """Represents a climbing attempt."""
     timestamp: datetime
-    hold_reached: str  # Hold identifier
+    hold_reached: str
     is_top: bool
-    time_taken: float  # In seconds
-    is_valid: bool = True
-    invalidation_reason: Optional[str] = None
-    judge_id: Optional[int] = None
-    video_url: Optional[str] = None
+    time_taken: float
+    is_valid: bool = True                    # has default
+    invalidation_reason: Optional[str] = None # has default
+    judge_id: Optional[int] = None           # has default
+    video_url: Optional[str] = None          # has default
 
 @dataclass
 class BoulderAttempt(Attempt):
@@ -62,10 +63,14 @@ class LeadAttempt(Attempt):
 @dataclass
 class SpeedAttempt(Attempt):
     """Speed climbing attempt data."""
-    lane: str  # A or B
+    lane: str = None  # A or B
     false_start: bool = False
     reaction_time: Optional[float] = None  # In seconds
-    split_times: List[float] = None  # List of split times
+    split_times: Optional[List[float]] = None  # List of split times
+
+    def __post_init__(self):
+        if self.lane is None:
+            raise ValueError("lane is required for SpeedAttempt")
 
 class ScoreCalculator:
     """Base class for score calculation."""
@@ -224,94 +229,273 @@ class SpeedScoreCalculator(ScoreCalculator):
             'follows_ifsc_rules': scoring_config.get('follows_ifsc_rules', True)
         }
 
-class ScoringManager:
-    """Manages scoring for competitions."""
+class EnhancedScoringManager:
+    """Enhanced scoring manager with support for custom rulesets and dynamic scoring."""
     
-    def __init__(self, discipline: ClimbingDiscipline, scoring_method: Optional[ScoringMethod] = None,
-                 ruleset: Optional[RankingRule] = None):
+    def __init__(self, 
+                 discipline: ClimbingDiscipline,
+                 scoring_method: Optional[ScoringMethod] = None,
+                 ruleset: Optional[Union[RankingRule, CustomRuleSet]] = None,
+                 custom_config: Optional[Dict] = None):
         self.discipline = discipline
         self.scoring_method = scoring_method or self._get_default_scoring_method()
-        self.ruleset = ruleset
+        
+        # Initialize ruleset
+        if ruleset:
+            self.ruleset = ruleset
+        elif custom_config:
+            self.ruleset = CustomRuleSet(config_dict=custom_config)
+        else:
+            self.ruleset = self._get_default_ruleset()
+            
+        # Initialize point system
+        if isinstance(self.ruleset, CustomRuleSet):
+            self.point_system = self.ruleset.point_system
+        else:
+            self.point_system = DynamicPointSystem(load_ruleset_config(
+                self.ruleset.__class__.__name__.replace('Rules', '')
+            ))
+            
+        # Initialize appropriate calculator based on discipline
         self.calculator = self._get_calculator()
     
     def _get_default_scoring_method(self) -> ScoringMethod:
         """Get default scoring method for discipline."""
-        if self.ruleset:
-            if isinstance(self.ruleset, FQMERules):
-                defaults = {
-                    ClimbingDiscipline.LEAD: ScoringMethod.FQME_LEAD,
-                    ClimbingDiscipline.BOULDER: ScoringMethod.FQME_BOULDER,
-                    ClimbingDiscipline.SPEED: ScoringMethod.IFSC_SPEED  # FQME uses IFSC speed rules
-                }
-            else:  # Default to IFSC
-                defaults = {
-                    ClimbingDiscipline.LEAD: ScoringMethod.IFSC_LEAD,
-                    ClimbingDiscipline.BOULDER: ScoringMethod.IFSC_BOULDER,
-                    ClimbingDiscipline.SPEED: ScoringMethod.IFSC_SPEED
-                }
+        if isinstance(self.ruleset, FQMERules):
+            defaults = {
+                ClimbingDiscipline.LEAD: ScoringMethod.FQME_LEAD,
+                ClimbingDiscipline.BOULDER: ScoringMethod.FQME_BOULDER,
+                ClimbingDiscipline.SPEED: ScoringMethod.IFSC_SPEED
+            }
         else:
             defaults = {
                 ClimbingDiscipline.LEAD: ScoringMethod.IFSC_LEAD,
                 ClimbingDiscipline.BOULDER: ScoringMethod.IFSC_BOULDER,
                 ClimbingDiscipline.SPEED: ScoringMethod.IFSC_SPEED
             }
-        return defaults.get(self.discipline, ScoringMethod.CUSTOM)
+        return defaults.get(self.discipline, ScoringMethod.IFSC_LEAD)
     
-    def _get_calculator(self) -> ScoreCalculator:
+    def _get_calculator(self):
         """Get appropriate calculator based on discipline."""
         calculators = {
             ClimbingDiscipline.LEAD: LeadScoreCalculator,
             ClimbingDiscipline.BOULDER: BoulderScoreCalculator,
             ClimbingDiscipline.SPEED: SpeedScoreCalculator
         }
-        calculator_class = calculators.get(self.discipline, ScoreCalculator)
+        calculator_class = calculators.get(self.discipline)
+        if not calculator_class:
+            raise ValueError(f"Unsupported discipline: {self.discipline}")
         return calculator_class(self.scoring_method, self.ruleset)
     
-    def score_attempt(self, attempt: Attempt, route_data: Dict) -> Dict:
-        """Score an attempt using the appropriate calculator."""
-        return self.calculator.calculate_score(attempt, route_data)
+    def calculate_rankings(self, attempts: List[Dict], round_data: Dict) -> Dict:
+        """Calculate rankings with enhanced features."""
+        # Calculate base rankings
+        rankings = self.calculator.calculate_rankings(attempts, round_data)
+        
+        # Add statistical analysis
+        stats = self._calculate_statistics(rankings)
+        
+        # Add performance metrics
+        metrics = self._calculate_performance_metrics(rankings)
+        
+        # Add countback information if needed
+        countback = None
+        if self.ruleset.config.get('ranking', {}).get('tiebreak', {}).get('methods', []):
+            if 'countback' in self.ruleset.config['ranking']['tiebreak']['methods']:
+                countback = self._calculate_countback(rankings)
+        
+        return {
+            'rankings': rankings,
+            'statistics': stats,
+            'performance_metrics': metrics,
+            'countback': countback
+        }
     
-    def validate_attempt(self, attempt: Attempt) -> Dict:
-        """Validate an attempt."""
-        return self.calculator.validate_attempt(attempt)
+    def _calculate_statistics(self, rankings: List[Dict]) -> Dict:
+        """Calculate statistical information about the rankings."""
+        if not rankings:
+            return {}
+            
+        scores = [r['score'] for r in rankings]
+        return {
+            'average_score': sum(scores) / len(scores),
+            'max_score': max(scores),
+            'min_score': min(scores),
+            'score_distribution': self._calculate_distribution(scores),
+            'participant_count': len(rankings),
+            'completion_rate': len([r for r in rankings if r.get('completed', False)]) / len(rankings)
+        }
     
-    def calculate_rankings(self, attempts: List[Dict], round_data: Dict) -> List[Dict]:
-        """Calculate rankings based on attempts."""
-        if self.discipline == ClimbingDiscipline.LEAD:
-            return self._calculate_lead_rankings(attempts)
-        elif self.discipline == ClimbingDiscipline.BOULDER:
-            return self._calculate_boulder_rankings(attempts)
-        elif self.discipline == ClimbingDiscipline.SPEED:
-            return self._calculate_speed_rankings(attempts)
-        else:
-            raise ValueError(f"Unsupported discipline: {self.discipline}")
+    def _calculate_performance_metrics(self, rankings: List[Dict]) -> Dict:
+        """Calculate advanced performance metrics."""
+        metrics = {}
+        
+        for ranking in rankings:
+            athlete_id = ranking['athlete_id']
+            metrics[athlete_id] = {
+                'consistency': self._calculate_consistency(ranking),
+                'efficiency': self._calculate_efficiency(ranking),
+                'technical_score': self._calculate_technical_score(ranking),
+                'comparative_performance': self._calculate_comparative_performance(ranking, rankings)
+            }
+        
+        return metrics
     
-    def _calculate_lead_rankings(self, attempts: List[Dict]) -> List[Dict]:
-        """Calculate rankings for lead climbing."""
-        # Sort by score (higher is better), then by time (lower is better)
-        return sorted(
-            attempts,
-            key=lambda x: (-x['score'], x['time']),
-            reverse=False
-        )
+    def _calculate_distribution(self, values: List[float]) -> Dict:
+        """Calculate distribution of values in ranges."""
+        if not values:
+            return {}
+            
+        min_val = min(values)
+        max_val = max(values)
+        range_size = (max_val - min_val) / 10  # 10 ranges
+        
+        distribution = {}
+        for i in range(10):
+            range_start = min_val + (i * range_size)
+            range_end = range_start + range_size
+            range_key = f"{range_start:.1f}-{range_end:.1f}"
+            distribution[range_key] = len([v for v in values if range_start <= v < range_end])
+            
+        return distribution
     
-    def _calculate_boulder_rankings(self, attempts: List[Dict]) -> List[Dict]:
-        """Calculate rankings for bouldering."""
-        # Sort by tops, then zones, then attempts
-        return sorted(
-            attempts,
-            key=lambda x: (
-                -x['tops'],
-                -x['zones'],
-                x['top_attempts'],
-                x['zone_attempts']
-            )
-        )
+    def _calculate_consistency(self, ranking: Dict) -> float:
+        """Calculate athlete's consistency score."""
+        attempts = ranking.get('attempts', [])
+        if not attempts:
+            return 0.0
+            
+        # Calculate variation in performance
+        scores = [a.get('score', 0) for a in attempts]
+        if not scores:
+            return 0.0
+            
+        mean_score = sum(scores) / len(scores)
+        variations = [(s - mean_score) ** 2 for s in scores]
+        variance = sum(variations) / len(variations)
+        
+        # Convert to consistency score (0-1)
+        max_variance = mean_score ** 2  # Theoretical maximum variance
+        consistency = 1 - (variance / max_variance if max_variance > 0 else 0)
+        
+        return round(consistency, 2)
     
-    def _calculate_speed_rankings(self, attempts: List[Dict]) -> List[Dict]:
-        """Calculate rankings for speed climbing."""
-        # Sort by time (lower is better), false starts are last
-        return sorted(
-            attempts,
-            key=lambda x: float('inf') if not x['valid'] else x['score']
-        ) 
+    def _calculate_efficiency(self, ranking: Dict) -> float:
+        """Calculate athlete's efficiency score."""
+        attempts = ranking.get('attempts', [])
+        if not attempts:
+            return 0.0
+            
+        successful_attempts = len([a for a in attempts if a.get('is_valid', False)])
+        return round(successful_attempts / len(attempts), 2)
+    
+    def _calculate_technical_score(self, ranking: Dict) -> float:
+        """Calculate athlete's technical score."""
+        attempts = ranking.get('attempts', [])
+        if not attempts:
+            return 0.0
+            
+        # Factors to consider for technical score
+        factors = {
+            'hold_efficiency': self._calculate_hold_efficiency(attempts),
+            'time_efficiency': self._calculate_time_efficiency(attempts),
+            'movement_quality': self._calculate_movement_quality(attempts)
+        }
+        
+        # Weighted average of factors
+        weights = {'hold_efficiency': 0.4, 'time_efficiency': 0.3, 'movement_quality': 0.3}
+        technical_score = sum(score * weights[factor] for factor, score in factors.items())
+        
+        return round(technical_score, 2)
+    
+    def _calculate_comparative_performance(self, ranking: Dict, all_rankings: List[Dict]) -> float:
+        """Calculate athlete's performance compared to the field."""
+        if not all_rankings:
+            return 0.0
+            
+        athlete_score = ranking.get('score', 0)
+        all_scores = [r.get('score', 0) for r in all_rankings]
+        
+        if not all_scores:
+            return 0.0
+            
+        average_score = sum(all_scores) / len(all_scores)
+        if average_score == 0:
+            return 0.0
+            
+        relative_performance = (athlete_score - average_score) / average_score
+        
+        return round(relative_performance, 2)
+    
+    def _calculate_hold_efficiency(self, attempts: List[Dict]) -> float:
+        """Calculate efficiency in using holds."""
+        if not attempts:
+            return 0.0
+            
+        hold_scores = []
+        for attempt in attempts:
+            holds_used = attempt.get('holds_used', [])
+            if holds_used:
+                score = attempt.get('score', 0)
+                hold_score = score / len(holds_used) if holds_used else 0
+                hold_scores.append(hold_score)
+                
+        return sum(hold_scores) / len(hold_scores) if hold_scores else 0.0
+    
+    def _calculate_time_efficiency(self, attempts: List[Dict]) -> float:
+        """Calculate time efficiency."""
+        if not attempts:
+            return 0.0
+            
+        time_scores = []
+        for attempt in attempts:
+            time_taken = attempt.get('time_taken', 0)
+            if time_taken > 0:
+                score = attempt.get('score', 0)
+                time_score = score / time_taken
+                time_scores.append(time_score)
+                
+        return sum(time_scores) / len(time_scores) if time_scores else 0.0
+    
+    def _calculate_movement_quality(self, attempts: List[Dict]) -> float:
+        """Calculate movement quality score."""
+        if not attempts:
+            return 0.0
+            
+        quality_scores = []
+        for attempt in attempts:
+            # Factors affecting movement quality
+            factors = {
+                'fluidity': attempt.get('movement_fluidity', 0),
+                'balance': attempt.get('balance_control', 0),
+                'technique': attempt.get('technique_score', 0)
+            }
+            
+            if any(factors.values()):
+                quality_score = sum(factors.values()) / len(factors)
+                quality_scores.append(quality_score)
+                
+        return sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+    
+    def _calculate_countback(self, rankings: List[Dict]) -> Dict:
+        """Calculate countback information for rankings."""
+        countback = {}
+        
+        for ranking in rankings:
+            athlete_id = ranking['athlete_id']
+            attempts = ranking.get('attempts', [])
+            
+            # Count placements
+            placements = {}
+            for attempt in attempts:
+                place = attempt.get('placement', 0)
+                if place > 0:
+                    placements[place] = placements.get(place, 0) + 1
+                    
+            countback[athlete_id] = {
+                'placements': placements,
+                'best_place': min(placements.keys()) if placements else None,
+                'placement_counts': dict(sorted(placements.items()))
+            }
+            
+        return countback 

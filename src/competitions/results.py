@@ -3,10 +3,11 @@ from datetime import datetime
 from django.db import transaction
 from django.core.cache import cache
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
 from .models import Competition, CompetitionResult
 from .scoring import (
-    ScoringManager, ClimbingDiscipline, Attempt,
+    EnhancedScoringManager as ScoringManager, ClimbingDiscipline, Attempt,
     LeadAttempt, BoulderAttempt, SpeedAttempt
 )
 from leagues.ranking import RankingRule, FQMERules, IFSCRules

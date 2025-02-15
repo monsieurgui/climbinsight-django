@@ -10,12 +10,12 @@ from .dashboard import LeagueDashboard
 
 # Create your views here.
 
-@role_required(['league_manager', 'admin'])
+@role_required(['ADMIN'])
 def create_league(request):
-    # Only league managers and admins can access this view
+    # Only admins can access this view
     pass
 
-@role_required('official')
+@role_required(['OFFICIAL'])
 def score_competition(request):
     # Only officials can access this view
     pass

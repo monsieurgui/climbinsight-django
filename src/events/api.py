@@ -1,9 +1,9 @@
-from ninja import Router, Schema
+from ninja import Router, Schema, Query
 from typing import List, Optional, Dict
 from datetime import datetime
 from django.shortcuts import get_object_or_404
 from django.core.cache import cache
-from django.db.models import Q
+from django.db.models import Q, Count, Avg, Max, Min
 
 from .models import Event, EventParticipation, EventIncident, EventScheduleChange
 from users.decorators import role_required
@@ -69,6 +69,25 @@ class ScheduleChangeSchema(Schema):
     new_start: datetime
     new_end: datetime
     reason: str
+
+# New Schemas
+class EventSearchSchema(Schema):
+    query: Optional[str] = None
+    competition_id: Optional[int] = None
+    event_type: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    category_id: Optional[int] = None
+    status: Optional[str] = None
+
+class EventAnalyticsSchema(Schema):
+    total_participants: int
+    participants_by_category: Dict[str, int]
+    incidents_by_severity: Dict[str, int]
+    schedule_changes: List[Dict]
+    participation_rate: float
+    average_duration: float
+    status_distribution: Dict[str, int]
 
 # Event Management Endpoints
 @router.get("/competition/{competition_id}/events", response=List[EventOut])
@@ -226,4 +245,153 @@ def change_schedule(request, event_id: int, payload: ScheduleChangeSchema):
 @router.get("/events/{event_id}/schedule-changes", response=List[dict])
 def list_schedule_changes(request, event_id: int):
     """List all schedule changes for an event."""
-    return EventScheduleChange.objects.filter(event_id=event_id).order_by('-created_at') 
+    return EventScheduleChange.objects.filter(event_id=event_id).order_by('-created_at')
+
+# New Endpoints
+@router.get("/search", response=List[EventOut])
+def search_events(request, params: EventSearchSchema = Query(...)):
+    """
+    Advanced search for events with multiple filter criteria.
+    """
+    cache_key = f"event_search_{hash(frozenset(params.dict().items()))}"
+    cached_results = cache.get(cache_key)
+    
+    if cached_results:
+        return cached_results
+
+    query = Event.objects.all()
+
+    if params.query:
+        query = query.filter(
+            Q(name__icontains=params.query) |
+            Q(description__icontains=params.query)
+        )
+
+    if params.competition_id:
+        query = query.filter(competition_id=params.competition_id)
+
+    if params.event_type:
+        query = query.filter(event_type=params.event_type)
+
+    if params.start_date:
+        query = query.filter(start_time__gte=params.start_date)
+
+    if params.end_date:
+        query = query.filter(end_time__lte=params.end_date)
+
+    if params.category_id:
+        query = query.filter(categories__id=params.category_id)
+
+    if params.status:
+        query = query.filter(status=params.status)
+
+    results = list(query.distinct())
+    cache.set(cache_key, results, timeout=300)  # Cache for 5 minutes
+    return results
+
+@router.get("/{event_id}/analytics", response=EventAnalyticsSchema)
+def get_event_analytics(request, event_id: int):
+    """
+    Get detailed analytics for an event.
+    """
+    cache_key = f"event_analytics_{event_id}"
+    cached_analytics = cache.get(cache_key)
+    
+    if cached_analytics:
+        return cached_analytics
+
+    event = get_object_or_404(Event, id=event_id)
+    participations = event.eventparticipation_set.all()
+    incidents = event.eventincident_set.all()
+    schedule_changes = event.eventschedulechange_set.all()
+
+    analytics = {
+        "total_participants": participations.count(),
+        "participants_by_category": dict(
+            participations.values('category__name')
+            .annotate(count=Count('id'))
+            .values_list('category__name', 'count')
+        ),
+        "incidents_by_severity": dict(
+            incidents.values('severity')
+            .annotate(count=Count('id'))
+            .values_list('severity', 'count')
+        ),
+        "schedule_changes": list(schedule_changes.values(
+            'new_start', 'new_end', 'reason', 'created_at'
+        )),
+        "participation_rate": (
+            participations.count() / event.competition.competitionregistration_set.count()
+            if event.competition.competitionregistration_set.count() > 0 else 0
+        ),
+        "average_duration": (
+            event.end_time - event.start_time
+        ).total_seconds() / 3600,  # Convert to hours
+        "status_distribution": dict(
+            participations.values('status')
+            .annotate(count=Count('id'))
+            .values_list('status', 'count')
+        )
+    }
+
+    cache.set(cache_key, analytics, timeout=600)  # Cache for 10 minutes
+    return analytics
+
+@router.get("/competition/{competition_id}/schedule", response=Dict)
+def get_competition_schedule(
+    request,
+    competition_id: int,
+    include_participants: bool = False,
+    include_incidents: bool = False
+):
+    """
+    Get a detailed schedule of all events in a competition.
+    """
+    cache_key = f"competition_schedule_{competition_id}_{include_participants}_{include_incidents}"
+    cached_schedule = cache.get(cache_key)
+    
+    if cached_schedule:
+        return cached_schedule
+
+    events = Event.objects.filter(competition_id=competition_id).order_by('start_time')
+    schedule = []
+
+    for event in events:
+        event_data = {
+            "id": event.id,
+            "name": event.name,
+            "event_type": event.event_type,
+            "start_time": event.start_time,
+            "end_time": event.end_time,
+            "location": event.location,
+            "status": event.status,
+            "categories": list(event.categories.values('id', 'name'))
+        }
+
+        if include_participants:
+            event_data["participants"] = list(
+                event.eventparticipation_set.select_related('athlete')
+                .values('athlete__id', 'athlete__first_name', 'athlete__last_name',
+                       'starting_position', 'status')
+            )
+
+        if include_incidents:
+            event_data["incidents"] = list(
+                event.eventincident_set.values('incident_type', 'severity',
+                                             'incident_time', 'description')
+            )
+
+        schedule.append(event_data)
+
+    result = {
+        "competition_id": competition_id,
+        "events": schedule,
+        "total_events": len(schedule),
+        "date_range": {
+            "start": min(event.start_time for event in events),
+            "end": max(event.end_time for event in events)
+        }
+    }
+
+    cache.set(cache_key, result, timeout=300)  # Cache for 5 minutes
+    return result 

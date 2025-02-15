@@ -1,10 +1,10 @@
 from ninja import Router, Schema, Field, Query
 from ninja.errors import HttpError
-from typing import List, Optional
+from typing import List, Optional, Dict
 from django.shortcuts import get_object_or_404
 from django.contrib.auth import get_user_model
 from ninja_jwt.authentication import JWTAuth
-from django.db.models import Q
+from django.db.models import Q, Count, Avg, Max, Min
 from ninja.security import HttpBearer
 from django.core.cache import cache
 from django.conf import settings
@@ -14,12 +14,14 @@ import scipy.stats as stats
 import csv
 import json
 from io import StringIO
-from datetime import datetime
+from datetime import datetime, date
+from django.utils.translation import gettext_lazy as _
+from users.decorators import role_required
 
 from users.api import User, UserResponseSchema
-from .models import League, Category, CompetitionResult, LeagueRanking
+from .models import League, Category, LeagueRanking
+from competitions.models import Competition, CompetitionResult
 from competitions.api import CompetitionOut
-from datetime import date
 from .schemas import (
     LeagueOut, LeagueIn, BulkLeagueIds, LeagueUpdateSchema,
     LeagueSummary
@@ -78,6 +80,29 @@ class ExportFormatSchema(Schema):
     include_statistics: bool = True
     include_historical: bool = False
     category_id: Optional[int] = None
+
+class LeagueSearchSchema(Schema):
+    query: Optional[str] = None
+    status: Optional[str] = None
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+    category_id: Optional[int] = None
+    min_participants: Optional[int] = None
+    has_active_competitions: Optional[bool] = None
+
+class BulkLeagueStatusUpdate(Schema):
+    league_ids: List[int]
+    new_status: str
+
+class LeagueStatisticsSchema(Schema):
+    total_participants: int
+    total_competitions: int
+    active_competitions: int
+    categories_distribution: Dict[str, int]
+    average_participants_per_competition: float
+    competition_frequency: Dict[str, int]  # Monthly distribution
+    participant_retention_rate: float
+    category_performance_stats: Dict[str, Dict]
 
 @router.get('', response=List[LeagueOut])
 def list_leagues(request, query: LeagueQuerySchema = None):
@@ -701,3 +726,202 @@ def export_statistics(request, league_id: int, params: ExportFormatSchema = Quer
 def ping(request):
     """Test endpoint to verify router is mounted"""
     return {"message": "leagues router is responding"}
+
+@router.get("/search", response=List[LeagueOut])
+def search_leagues(request, params: LeagueSearchSchema = Query(...)):
+    """
+    Advanced search for leagues with multiple filter criteria.
+    """
+    cache_key = f"league_search_{hash(frozenset(params.dict().items()))}"
+    cached_results = cache.get(cache_key)
+    
+    if cached_results:
+        return cached_results
+
+    query = League.objects.all()
+
+    if params.query:
+        query = query.filter(
+            Q(name__icontains=params.query) |
+            Q(description__icontains=params.query)
+        )
+
+    if params.status:
+        query = query.filter(status=params.status)
+
+    if params.start_date:
+        query = query.filter(start_date__gte=params.start_date)
+
+    if params.end_date:
+        query = query.filter(end_date__lte=params.end_date)
+
+    if params.category_id:
+        query = query.filter(categories__id=params.category_id)
+
+    if params.min_participants:
+        query = query.annotate(
+            participant_count=Count('athletes', distinct=True)
+        ).filter(participant_count__gte=params.min_participants)
+
+    if params.has_active_competitions is not None:
+        if params.has_active_competitions:
+            query = query.filter(competitions__is_active=True)
+        else:
+            query = query.exclude(competitions__is_active=True)
+
+    results = list(query.distinct())
+    cache.set(cache_key, results, timeout=300)  # Cache for 5 minutes
+    return results
+
+@router.get("/{league_id}/overview", response=Dict)
+def get_league_overview(
+    request,
+    league_id: int,
+    include_competitions: bool = True,
+    include_rankings: bool = True,
+    include_statistics: bool = True
+):
+    """
+    Get a comprehensive overview of a league including competitions, rankings, and statistics.
+    """
+    cache_key = f"league_overview_{league_id}_{include_competitions}_{include_rankings}_{include_statistics}"
+    cached_data = cache.get(cache_key)
+    
+    if cached_data:
+        return cached_data
+
+    league = get_object_or_404(League, id=league_id)
+    overview = {
+        "id": league.id,
+        "name": league.name,
+        "status": league.status,
+        "start_date": league.start_date,
+        "end_date": league.end_date,
+    }
+
+    if include_competitions:
+        overview["competitions"] = list(league.competitions.all().values(
+            'id', 'name', 'start_date', 'end_date', 'status', 'is_active'
+        ))
+
+    if include_rankings:
+        overview["rankings"] = list(league.leagueranking_set.all().select_related(
+            'athlete', 'category'
+        ).values(
+            'athlete__id', 'athlete__first_name', 'athlete__last_name',
+            'category__name', 'points', 'ranking'
+        ))
+
+    if include_statistics:
+        overview["statistics"] = get_league_statistics(request, league_id).body
+
+    cache.set(cache_key, overview, timeout=300)  # Cache for 5 minutes
+    return overview
+
+@router.get("/{league_id}/statistics", response=LeagueStatisticsSchema)
+def get_league_statistics(
+    request,
+    league_id: int,
+    category_id: Optional[int] = None,
+    time_period: Optional[str] = None
+):
+    """
+    Get detailed statistics for a league.
+    """
+    cache_key = f"league_stats_{league_id}_{category_id}_{time_period}"
+    cached_stats = cache.get(cache_key)
+    
+    if cached_stats:
+        return cached_stats
+
+    league = get_object_or_404(League, id=league_id)
+    competitions = league.competitions.all()
+    
+    if category_id:
+        competitions = competitions.filter(categories__id=category_id)
+
+    # Basic statistics
+    stats = {
+        "total_participants": league.athletes.count(),
+        "total_competitions": competitions.count(),
+        "active_competitions": competitions.filter(is_active=True).count(),
+        "categories_distribution": {
+            cat.name: cat.competitions.filter(league=league).count()
+            for cat in league.categories.all()
+        },
+    }
+
+    # Advanced statistics
+    stats["average_participants_per_competition"] = (
+        CompetitionResult.objects.filter(competition__league=league)
+        .values('competition')
+        .annotate(participant_count=Count('athlete', distinct=True))
+        .aggregate(Avg('participant_count'))['participant_count__avg'] or 0
+    )
+
+    # Competition frequency by month
+    competition_dates = competitions.values_list('start_date__month', flat=True)
+    stats["competition_frequency"] = {
+        str(month): competition_dates.filter(start_date__month=month).count()
+        for month in range(1, 13)
+    }
+
+    # Participant retention rate
+    total_competitions = competitions.count()
+    if total_competitions > 1:
+        multi_competition_athletes = (
+            CompetitionResult.objects.filter(competition__league=league)
+            .values('athlete')
+            .annotate(competition_count=Count('competition', distinct=True))
+            .filter(competition_count__gt=1)
+            .count()
+        )
+        stats["participant_retention_rate"] = (
+            multi_competition_athletes / league.athletes.count()
+            if league.athletes.count() > 0 else 0
+        )
+    else:
+        stats["participant_retention_rate"] = 0
+
+    # Category performance statistics
+    stats["category_performance_stats"] = {}
+    for category in league.categories.all():
+        category_results = CompetitionResult.objects.filter(
+            competition__league=league,
+            category=category
+        )
+        if category_results.exists():
+            stats["category_performance_stats"][category.name] = {
+                "average_points": category_results.aggregate(Avg('points'))['points__avg'],
+                "max_points": category_results.aggregate(Max('points'))['points__max'],
+                "min_points": category_results.aggregate(Min('points'))['points__min'],
+                "participant_count": category_results.values('athlete').distinct().count()
+            }
+
+    cache.set(cache_key, stats, timeout=600)  # Cache for 10 minutes
+    return stats
+
+@router.post("/bulk-status-update", response=Dict)
+@role_required(['Admin'])
+def bulk_update_league_status(request, payload: BulkLeagueStatusUpdate):
+    """
+    Update the status of multiple leagues at once.
+    """
+    updated_count = League.objects.filter(id__in=payload.league_ids).update(
+        status=payload.new_status
+    )
+    
+    # Clear relevant caches
+    cache_keys_to_delete = [
+        f"league_search_*",
+        f"league_overview_*",
+        f"league_stats_*"
+    ]
+    for key_pattern in cache_keys_to_delete:
+        cache.delete_pattern(key_pattern)
+    
+    return {
+        "success": True,
+        "updated_count": updated_count,
+        "message": f"Successfully updated {updated_count} leagues"
+    }
