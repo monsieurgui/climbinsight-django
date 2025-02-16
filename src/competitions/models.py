@@ -129,7 +129,7 @@ class CompetitionResult(models.Model):
     competition = models.ForeignKey(Competition, on_delete=models.CASCADE, related_name='results')
     athlete = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     category = models.ForeignKey(Category, on_delete=models.CASCADE)
-    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name='results')
+    round = models.ForeignKey(Round, on_delete=models.CASCADE, related_name='results', null=True)
     
     # Results
     ranking = models.IntegerField(_('ranking'))

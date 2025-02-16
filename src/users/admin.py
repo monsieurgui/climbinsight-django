@@ -11,23 +11,29 @@ class RoleAdmin(admin.ModelAdmin):
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('email', 'username', 'first_name', 'last_name', 'is_active', 'role')
-    list_filter = ('is_active', 'role', 'primary_login_method')
+    list_display = ('email', 'username', 'first_name', 'last_name', 'is_active', 'email_verified', 'role')
+    list_filter = ('is_active', 'email_verified', 'role', 'primary_login_method')
     search_fields = ('email', 'username', 'first_name', 'last_name')
     ordering = ('email',)
     
     fieldsets = (
-        (None, {'fields': ('email', 'password')}),
+        (None, {'fields': ('email', 'email_verified', 'password')}),
         (_('Personal info'), {'fields': (
             'username', 'first_name', 'last_name', 'date_of_birth', 
-            'phone_number', 'avatar', 'climbing_level'
+            'phone', 'avatar', 'climbing_level', 'bio', 'profile_picture'
+        )}),
+        (_('Additional info'), {'fields': (
+            'emergency_contact', 'medical_info', 'certifications'
         )}),
         (_('Social accounts'), {'fields': (
             'google_id', 'facebook_id', 'primary_login_method'
         )}),
-        (_('Permissions'), {'fields': (
-            'is_active', 'is_staff', 'is_superuser', 'role',
+        (_('Roles and Permissions'), {'fields': (
+            'is_active', 'is_staff', 'is_superuser', 'role', 'roles',
             'groups', 'user_permissions'
+        )}),
+        (_('Preferences'), {'fields': (
+            'preferences', 'notification_settings'
         )}),
         (_('Important dates'), {'fields': ('last_login', 'date_joined')}),
     )

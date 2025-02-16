@@ -34,12 +34,13 @@ class User(AbstractUser):
         MEDICAL_STAFF = 'MEDICAL_STAFF', _('Medical Staff')
     
     email = models.EmailField(_('email address'), unique=True)
+    email_verified = models.BooleanField(_('email verified'), default=False)
     phone = models.CharField(_('phone number'), max_length=20, blank=True)
     roles = models.JSONField(_('user roles'), default=list)  # List of roles
     date_of_birth = models.DateField(_('date of birth'), null=True, blank=True)
     emergency_contact = models.JSONField(_('emergency contact'), null=True, blank=True)
     medical_info = models.JSONField(_('medical information'), null=True, blank=True)
-    certifications = models.JSONField(_('certifications'), default=list)
+    certifications = models.JSONField(_('certifications'), default=list, null=True)
     
     # Profile fields
     bio = models.TextField(_('biography'), blank=True)

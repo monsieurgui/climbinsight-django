@@ -15,12 +15,11 @@ from datetime import timedelta
 import os
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Load environment variables from the src directory
+load_dotenv(BASE_DIR / '.env.development')
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
@@ -49,15 +48,19 @@ INSTALLED_APPS = [
     'gyms.apps.GymsConfig',
     'users.apps.UsersConfig',
     'ninja',
+    'ninja_extra',
+    'ninja_jwt',
     'social_django',
     'corsheaders',
     'rest_framework',
+    'anymail',  # Add Anymail to installed apps
+    'mailer',  # Add django-mailer
 ]
 
 MIDDLEWARE = [
+    'corsheaders.middleware.CorsMiddleware',  # This should be as high as possible
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -76,7 +79,10 @@ ROOT_URLCONF = 'core.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [os.path.join(BASE_DIR, 'templates')],
+        'DIRS': [
+            os.path.join(BASE_DIR, 'templates'),  # Main templates directory
+            os.path.join(BASE_DIR, 'users', 'templates'),  # User app templates
+        ],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -85,6 +91,7 @@ TEMPLATES = [
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
             ],
+            'debug': DEBUG,  # Enable template debugging in development
         },
     },
 ]
@@ -194,23 +201,52 @@ SOCIAL_AUTH_PIPELINE = (
 )
 
 # Email settings
-EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
-EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
-EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
-EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
-DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'noreply@climbinsight.com')
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'  # TODO: Configure proper email backend
+EMAIL_HOST = 'placeholder'
+EMAIL_PORT = 587
+EMAIL_USE_TLS = True
+EMAIL_HOST_USER = 'placeholder@email.com'
+EMAIL_HOST_PASSWORD = 'placeholder-password'
+DEFAULT_FROM_EMAIL = 'placeholder@email.com'
+
+# Enable SMTP debugging in development
+if DEBUG:
+    EMAIL_DEBUG = True
+    EMAIL_TIMEOUT = 60
 
 # Frontend URL for email links
 FRONTEND_URL = os.getenv('FRONTEND_URL', 'http://localhost:3000')
 
 # CORS settings
-CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
-CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:3000').split(',')
+CORS_ALLOW_CREDENTIALS = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:4200",
+    "http://127.0.0.1:4200"
+]
+CORS_ALLOW_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+CORS_ALLOW_HEADERS = [
+    'accept',
+    'accept-encoding',
+    'authorization',
+    'content-type',
+    'dnt',
+    'origin',
+    'user-agent',
+    'x-csrftoken',
+    'x-requested-with',
+]
+
+CSRF_TRUSTED_ORIGINS = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:4200,http://127.0.0.1:4200').split(',')
 
 # Add this with your other settings
-ALLOW_REGISTRATION = os.getenv('ALLOW_REGISTRATION', 'False').lower() == 'true'
+ALLOW_REGISTRATION = str(os.getenv('ALLOW_REGISTRATION', 'False')).lower() == 'true'
 
 APPEND_SLASH = True
 
@@ -267,3 +303,11 @@ API_CONTACT_EMAIL = os.getenv('API_CONTACT_EMAIL', 'contact@climbinsight.com')
 # API Rate Limiting Settings
 API_RATE_LIMIT = int(os.getenv('API_RATE_LIMIT', 100))  # requests per minute
 API_RATE_LIMIT_PERIOD = 60  # seconds
+
+# Django REST Framework settings
+REST_FRAMEWORK = {
+    'DATE_FORMAT': '%Y-%m-%d',
+    'DATE_INPUT_FORMATS': ['%Y-%m-%d'],
+    'DATETIME_FORMAT': '%Y-%m-%dT%H:%M:%S',
+    'DATETIME_INPUT_FORMATS': ['%Y-%m-%dT%H:%M:%S'],
+}
